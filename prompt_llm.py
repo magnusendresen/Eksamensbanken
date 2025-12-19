@@ -2,10 +2,10 @@ import os
 import time
 from openai import OpenAI
 
-api_key = os.getenv("DEEPSEEK_API_KEY")
+api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
     raise ValueError("API key not found in environment variables.")
-client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
 usd_per_1m_input_tokens = 0.27
 usd_per_1m_output_tokens = 1.10
 
@@ -27,8 +27,17 @@ def prompt_llm(
         pass
 
     response = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[{"role": "user", "content": prompt}],
+        model="llama-3.1-8b-instant",
+        messages=[
+            {
+                "role": "system",
+                "content": PROMPT_CONFIG + "find the eigenvalues and eigenvectors of the following matrix. explain clearly and do it step by step: "
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
         max_tokens=int(max_len/4),
         stream=False
     )
@@ -41,3 +50,8 @@ def prompt_llm(
         return llm_reply
     else:
         raise ValueError("No response from LLM.")
+    
+if __name__ == "__main__":
+    test_prompt = "A=[1 2 3, 4 5 6, 7 8 9]"
+    out = prompt_llm(test_prompt, is_numeric=False, max_len=400)
+    print("OUTPUT:", repr(out))
