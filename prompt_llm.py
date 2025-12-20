@@ -6,35 +6,40 @@ from tkinter import filedialog
 from typing import Literal
 from openai import OpenAI
 
-api_configs = {
-    "groq": {
-        "api_key": os.getenv("GROQ_API_KEY"),
-        "base_url": "https://api.groq.com/openai/v1",
-        "model": "llama-3.1-8b-instant",
-        "cost": {"input": 0.05, "output": 0.08} # USD per 1m tokens
-    },
-    "openai": {
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4o-mini",
-        "cost": {"input": 0.15, "output": 0.6} # USD per 1m tokens
-    }
-}
+class LLMProvider:
+    def __init__(self, *, name: str, base_url: str, model: str, cost: dict[str, float]):
+        self.name = name
+        self.env_var = f"{name.upper()}_API_KEY"
+        self.base_url = base_url
+        self.model = model
+        self.cost = cost  # USD per 1m tokens
 
-clients = {}
+        api_key = os.getenv(self.env_var)
+        if not api_key:
+            raise ValueError(f"{self.env_var} not found in enviroment variables.")
+        
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url
+        )
 
-for api, cfg in api_configs.items():
-    if not cfg["api_key"]:
-        raise ValueError(f"{api.upper()}_API_KEY not found in enviroment variable.")
-    
-    clients[api] = OpenAI(
-        api_key=cfg["api_key"],
-        base_url=cfg["base_url"],
+    def estimate_cost(self, n_tokens, token_type: Literal["input", "output"]):
+        return (self.cost[token_type] / 1_000_000) * n_tokens
+        
+LLM_PROVIDERS = {
+    "groq": LLMProvider(
+        name="groq",
+        base_url="https://api.groq.com/openai/v1",
+        model="llama-3.1-8b-instant",
+        cost={"input": 0.05, "output": 0.08}
+    ),
+    "openai": LLMProvider(
+        name="openai",
+        base_url="https://api.openai.com/v1",
+        model="gpt-4o-mini",
+        cost={"input": 0.15, "output": 0.6}
     )
-
-def calculate_cost(api_config: dict, n_tokens: int, token_type: str):
-    cost_per_m = api_config["cost"][token_type]
-    return (cost_per_m / 1_000_000) * n_tokens
+}
 
 def prompt_llm(
         system_prompt: str,
@@ -64,20 +69,20 @@ def prompt_llm(
     elif response_type == "numbers":
         system_prompt += "RESPOND WITH A LIST OF NUMBERS SEPARATED BY A COMMA. NOTHING ELSE. "
 
-    provider  = ""
+    selected_provider  = ""
     if image_bytes is None:
-        provider = "groq"
+        selected_provider = LLM_PROVIDERS["groq"]
         user_content = user_prompt
     else:
-        provider = "openai"
+        selected_provider = LLM_PROVIDERS["openai"]
         data_url = f"data:image/png;base64,{base64.b64encode(image_bytes).decode('ascii')}"
         user_content = [
                     { "type": "text", "text": user_prompt },
                     { "type": "image_url", "image_url": { "url": data_url}}
                 ]
 
-    response = clients[provider].chat.completions.create(
-        model=api_configs[provider]["model"],
+    response = selected_provider.client.chat.completions.create(
+        model=selected_provider.model,
         messages=[
             {
                 "role": "system",
@@ -97,13 +102,10 @@ def prompt_llm(
     
     llm_reply = response.choices[0].message.content.strip()
 
-    cfg = api_configs[provider]
-
-    input_cost = calculate_cost(api_config=cfg, n_tokens=((len(system_prompt) + len(user_prompt))//4), token_type="input")
-    output_cost = calculate_cost(api_config=cfg, n_tokens=(len(llm_reply)//4), token_type="output")
-    output_cost = 0
+    input_cost = selected_provider.estimate_cost(n_tokens=((len(system_prompt) + len(user_prompt))//4), token_type="input")
     if image_bytes is not None:
-        output_cost = calculate_cost(api_config=cfg, n_tokens=int(len(base64.b64encode(image_bytes)) / 1000), token_type="input")
+        input_cost += selected_provider.estimate_cost(n_tokens=int(len(base64.b64encode(image_bytes)) // 1000), token_type="input")
+    output_cost = selected_provider.estimate_cost(n_tokens=(len(llm_reply)//4), token_type="output")
 
     elapsed = time.time() - start_time 
 
@@ -137,11 +139,11 @@ if __name__ == "__main__":
         img_bytes = f.read()
 
     result = prompt_llm(
-        system_prompt="Is there an electrical circuit in this image? Answel with a boolean.",
+        system_prompt="Write all text found in this image.",
         user_prompt="",
         image_bytes=img_bytes,
-        response_type="number",
-        max_len=16
+        response_type="text",
+        max_len=200
     )
 
     print("LLM RESULT:", repr(result))
