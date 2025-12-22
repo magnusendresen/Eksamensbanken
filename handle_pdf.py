@@ -10,61 +10,70 @@ from io import BytesIO
 from prompt_llm import prompt_llm, PROMPT_CONFIG
 from ocr import ocr_image, page_to_img_bytes, run_in_threads
 
+class Subject:
+    def __init__(self, code: str, name: str):
+        self.code = code
+        self.name = name
+        self.domain = "" # Basic description of the subject (Matematikk, fysikk, osv.)
+        self.topics = []
+
 class Exam:
-    def __init__(self, exam: str):
-        self.pdf = Pdf(f"{exam}.pdf")
-        self.parsed_text = ""
-        self.ocr_text = ""
+    def __init__(self, subject: Subject, version: str, domain: str):
+        self.subject = subject
+        self.name = f"{subject.code.strip().upper()}_{version.strip().upper()}"
 
-    # Temporary logic for loading existing data
-        if not os.path.exists(f"{exam}_parsed.txt"):
-            print() # Gather parsed text
-        elif os.path.exists(f"{exam}_parsed.txt"):
-            with open(f"{exam}_parsed.txt", "r", encoding="utf-8") as f:
-                self.parsed_text = f.read()
+        self.pdf = Pdf(path=f"{self.name}.pdf")
+        self.solution_pdf = "" 
 
-        if not os.path.exists(f"{exam}_ocr.txt"):
-            print() # Gather OCR text
-        elif os.path.exists(f"{exam}_ocr.txt"):
-            with open(f"{exam}_ocr.txt", "r", encoding="utf-8") as f:
-                self.ocr_text = f.read()
+        self.tasks = []
+        self.solutions = []
+
+class Task:
+    def __init__(self, exam: Exam, task_number: str):
+        self.exam = exam
+        self.task_number = task_number
+
+        self.task_text = ""
+        self.code_text = "" # Maybe utalize this?
+        self.solution_text = "" 
+        self.points = 0
+        self.raw_text = ""
+        self.topic = ""
+        self.bbox = []
 
 
 class Pdf:
     def __init__(self, path: str):
+        self.raw_pdf = fitz.open(path)
         self.path = path
-        self.doc = fitz.open(path)
-        self.pages = []
-        self.blocks = []
-        self.ocr_text = ""
-        
-        for i, page in enumerate(self.doc):
-            self.pages.append(Page(self, page, i))
-            self.ocr_text += str(self.pages[i].ocr_text) + "\n"
 
-        self.blocks = [block for page in self.pages for block in page.blocks]
-        print(f"Loaded PDF. Summary: {len(self.pages)} pages, {len(self.blocks)} blocks ({sum(b.type == 1 for b in self.blocks)} images and {sum(b.type == 0 for b in self.blocks)} text), {len(self.ocr_text)} characters from OCR.")
+        self.pages = []
+        for i, raw_page in enumerate(self.raw_pdf):
+            self.pages.append(Page(pdf=self, raw_page=raw_page, page_number=i))
+            self.ocr_text += str(self.pages[-1].ocr_text) + "\n"
 
 class Page:
-    def __init__(self, pdf, page, page_number: int):
+    def __init__(self, pdf, raw_page, page_number: int):
         self.pdf = pdf
-        self.page = page
+        self.raw_page = raw_page
         self.page_number = page_number
+
+        self.ocr_text = ocr_image(page_to_img_bytes(raw_page))
+
         self.blocks = []
-        self.ocr_text = ocr_image(page_to_img_bytes(page))
+        for i, raw_block in enumerate(raw_page.get_text("dict")["blocks"]):
+            self.blocks.append(PdfBlock(page=self, raw_block=raw_block, block_number=i))
 
-        for i, block in enumerate(page.get_text("dict")["blocks"]):
-            self.blocks.append(Bbox(pdf, self, block, i))
-
-class Bbox:
-    def __init__(self, pdf, page, block, block_number: int):
-        self.pdf = pdf
+class PdfBlock:
+    def __init__(self, page, raw_block, block_number: int):
         self.page = page
-        self.block_number = block_number
-        self.type = block["type"]
+        self.raw_block = raw_block
 
-        self.top = block["bbox"][1]
-        self.bottom = block["bbox"][3]
+        self.block_number = block_number
+        self.type = raw_block["type"]
+
+        self.top = raw_block["bbox"][1]
+        self.bottom = raw_block["bbox"][3]
 
 def select_pdf():
     root = tk.Tk()
@@ -95,13 +104,13 @@ def parse_pdf_blocks(pdf_path: str) -> str:
             block_title = f"BLOCK {block_counter} | TYPE: {block_type_str}"
             parsed_text += block_title + "\n"
 
-            if block_type == 0: # text block
+            if block_type == 0:  # text block
                 block_text = ""
                 for line in block.get("lines", []):
                     for span in line.get("spans", []):
                         block_text += span.get("text", "")
                 parsed_text += block_text + "\n"
-            elif block_type == 1: # image block
+            elif block_type == 1:  # image block
                 x0, y0, x1, y1 = block["bbox"]
                 pix = page.get_pixmap(clip=fitz.Rect(x0, y0, x1, y1))
                 img_data = pix.tobytes("png")
@@ -112,17 +121,26 @@ def parse_pdf_blocks(pdf_path: str) -> str:
             block_counter += 1
 
     return parsed_text
-    
+
 def get_pdf_exam_data(pdf_text: str) -> str:
     version = prompt_llm(
-        prompt=PROMPT_CONFIG + f"Extract the exam version from the following text formatted as NXY, where N is the time of year (V for before july, K for august, and H for after september), and XY is the year itself (24 for 2024, 19 for 2019, etc.).:\n\n{pdf_text}",
-        is_numeric=False,
+        system_prompt=(
+            "Extract the exam version from the following text formatted as NXY, "
+            "where N is the time of year (V for before july, K for august, and H "
+            "for after september), and XY is the year itself (24 for 2024, 19 for "
+            "2019, etc.)."
+        ),
+        user_prompt=pdf_text,
         max_len=1000
     )
 
     subject = prompt_llm(
-        prompt=PROMPT_CONFIG + f"Extract the exam subject from the following text. Respond with nothing other than the subject code. Respond with all subject codes in the text separated by a comma (e.g. TMM4100, TMM4102):\n\n{pdf_text}",
-        is_numeric=False,
+        system_prompt=(
+            "Extract the exam subject from the following text. Respond with "
+            "nothing other than the subject codes. Respond with all subject "
+            "codes in the text separated by a comma (e.g. TMM4100, TMM4102, VB1004)."
+        ),
+        user_prompt=pdf_text,
         max_len=1000
     )
     subject_list = [s.strip() for s in subject.split(", ")]
@@ -138,10 +156,11 @@ def test_classes():
     pdf = Pdf(pdf_path)
     # for page in pdf.pages:
     #     print(f"Side {page.page_number} har {len(page.blocks)} blokker")
-
+    #
     #     for block in page.blocks:
     #         print(
     #             f"  Block {block.block_number}: "
     #             f"type={block.type}, top={block.top:.1f}, bottom={block.bottom:.1f}"
     #         )
+
 test_classes()
