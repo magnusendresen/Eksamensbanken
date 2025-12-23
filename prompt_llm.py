@@ -45,13 +45,13 @@ def prompt_llm(
         system_prompt: str,
         user_prompt: str,
         *,
-        response_type: Literal["text", "number", "numbers"] = "text",
+        response_type: Literal["text", "number", "text_list", "number_list"] = "text",
         image_bytes: bytes | None = None,
         use_prompt_config: bool = True,
         max_len: int,
         ) -> str:
     
-    if response_type not in ("text", "number", "numbers"):
+    if response_type not in ("text", "number", "text_list", "number_list"):
         raise ValueError(f"Invalid response_type: {response_type}")
     
     start_time = time.time()
@@ -112,12 +112,13 @@ def prompt_llm(
     print(f"Response took {int(elapsed)} seconds, and cost around {input_cost + output_cost:.6f} USD.")
 
     if response_type == "number":
-        return float(llm_reply) if "." in llm_reply else int(llm_reply)
-    elif response_type == "numbers": # Merk at numbers foreloepig kun tar Int
-        return [int(num.strip()) for num in llm_reply.split(",")]
+        return_type = float if "." in llm_reply else int
+        return return_type(llm_reply.strip())
+    elif response_type in ("number_list", "text_list"):
+        return_type = int if response_type == "number_list" else str
+        return [return_type(num.strip().upper()) for num in llm_reply.split(",")]
     else:
         return llm_reply
-    
 
 
 if __name__ == "__main__":
