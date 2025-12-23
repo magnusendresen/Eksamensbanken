@@ -1,33 +1,37 @@
+from __future__ import annotations
 import os
 import time
 import tkinter as tk
 from tkinter import filedialog
 from openai import OpenAI
 import fitz
+from typing import Literal
 import pytesseract
 from PIL import Image
 from io import BytesIO
-from prompt_llm import prompt_llm, PROMPT_CONFIG
+from prompt_llm import prompt_llm
 from ocr import ocr_image, page_to_img_bytes, run_in_threads
 
 class Subject:
-    def __init__(self, code: str, name: str):
+    code: str
+    name: str
+    category: str
+    topics: list[str]
+
+    def __init__(self, code):
         self.code = code
-        self.name = name
-        self.field = "" # Basic description of the subject (Matematikk, fysikk, osv.)
-        self.topics = []
+
 
 class Exam:
-    def __init__(self, pdf_path: str, version: str, domain: str):
+    pdf: str
+    solution_pdf: object
+    subject: str
+    tasks: list[str]
+    solutions: list[str]
+
+    def __init__(self, pdf_path):
         #self.name = f"{subject.code.strip().upper()}_{version.strip().upper()}"
-
-        self.pdf = Pdf(path=f"{self.name}.pdf")
-        self.solution_pdf = "" 
-
-        self.subject = self.assign_subject()
-
-        self.tasks = []
-        self.solutions = []
+        self.pdf = Pdf(path=pdf_path)
 
     def assign_subject(self):
         return prompt_llm(
@@ -54,29 +58,42 @@ class Exam:
         
 
 class Task:
-    def __init__(self, exam: Exam, task_number: str):
+    exam: Exam
+    task_number: str
+    task_text: str
+    code_text: str
+    images: list[str]
+    solution_text: str
+    points: float
+    raw_text: str
+    topic: str
+    bbox: list[float]
+
+    def __init__(self, exam, task_number):
         self.exam = exam
         self.task_number = task_number
-        self.task_text = ""
-        self.code_text = "" # Maybe utalize this?
-        self.solution_text = "" 
-        self.points = 0
-        self.raw_text = ""
-        self.topic = ""
-        self.bbox = []
 
 
 class Pdf:
+    exam: Exam
+    raw_pdf: fitz.Document
+    path: str
+    pages: list[Page]
+    
     def __init__(self, path: str):
         self.raw_pdf = fitz.open(path)
         self.path = path
 
-        self.pages = []
         for i, raw_page in enumerate(self.raw_pdf):
             self.pages.append(Page(pdf=self, raw_page=raw_page, page_number=i))
-            self.ocr_text += str(self.pages[-1].ocr_text) + "\n"
 
 class Page:
+    pdf: Pdf
+    raw_page: fitz.Page
+    page_number: int
+    ocr_text: str
+    blocks: list[PdfBlock]
+
     def __init__(self, pdf, raw_page, page_number: int):
         self.pdf = pdf
         self.raw_page = raw_page
@@ -84,13 +101,17 @@ class Page:
 
         self.ocr_text = ocr_image(page_to_img_bytes(raw_page))
 
-        self.blocks = []
         for i, raw_block in enumerate(raw_page.get_text("dict")["blocks"]):
             self.blocks.append(PdfBlock(page=self, raw_block=raw_block, block_number=i))
 
-        
-
 class PdfBlock:
+    page: Page
+    raw_block: dict[str, any]
+    block_number: int
+    type: Literal[0,1]
+    raw_text: str
+    bbox: list[float]
+
     def __init__(self, page, raw_block, block_number: int):
         self.page = page
         self.raw_block = raw_block
@@ -100,8 +121,7 @@ class PdfBlock:
 
         self.raw_text = self.get_block_text()
 
-        self.top = raw_block["bbox"][1]
-        self.bottom = raw_block["bbox"][3]
+        self.bbox = raw_block["bbox"]
     
     def get_block_text(self):
         block_text = ""
@@ -144,4 +164,4 @@ def test_classes():
     #             f"type={block.type}, top={block.top:.1f}, bottom={block.bottom:.1f}"
     #         )
 
-test_classes()
+# test_classes()
