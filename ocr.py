@@ -16,7 +16,7 @@ async def run_in_threads(func, items):
 def page_to_img_bytes(page) -> bytes:
     mat = fitz.Matrix(2, 2)
     pix = page.get_pixmap(matrix=mat, alpha=False)
-    return pix.tobytes()
+    return pix.tobytes("png")
 
 def ocr_image(img: bytes) -> str:
     try:
