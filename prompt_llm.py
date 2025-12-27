@@ -115,9 +115,8 @@ def prompt_llm(
 
     elapsed = time.time() - start_time 
 
-    print(f"Response took {int(elapsed)} seconds, and cost around {input_cost + output_cost:.6f} USD.")
-
     if LOG_PROMPTS:
+        print(f"Response took {int(elapsed)} seconds, and cost around {input_cost + output_cost:.6f} USD.")
         log_prompt_to_file(system_prompt, user_content)
 
 
