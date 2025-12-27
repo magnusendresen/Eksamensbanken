@@ -4,7 +4,13 @@ import base64
 import tkinter as tk
 from tkinter import filedialog
 from typing import Literal
+import threading
+from datetime import datetime
+from pathlib import Path
+import time
 from openai import OpenAI
+
+LOG_PROMPTS = True
 
 class LLMProvider:
     def __init__(self, *, name: str, base_url: str, model: str, cost: dict[str, float]):
@@ -111,6 +117,10 @@ def prompt_llm(
 
     print(f"Response took {int(elapsed)} seconds, and cost around {input_cost + output_cost:.6f} USD.")
 
+    if LOG_PROMPTS:
+        log_prompt_to_file(system_prompt, user_content)
+
+
     if response_type == "number":
         return_type = float if "." in llm_reply else int
         return return_type(llm_reply.strip())
@@ -120,6 +130,21 @@ def prompt_llm(
     else:
         return llm_reply
 
+PROMPT_LOG_DIR = Path("prompt_logs")
+
+def log_prompt_to_file(system_prompt: str, user_content: str):
+    PROMPT_LOG_DIR.mkdir(exist_ok=True)
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    path = PROMPT_LOG_DIR / f"prompt_{ts}.txt"
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("=== SYSTEM PROMPT ===\n\n")
+        f.write(system_prompt.strip())
+        f.write("\n\n=== USER CONTENT ===\n\n")
+        f.write(user_content.strip())
+
+    return path
 
 if __name__ == "__main__":
     root = tk.Tk()
