@@ -1,14 +1,14 @@
 MAIN_CATEGORIES = [
-	"Mathematics",
-	"Physics",
-	"Chemistry",
-	"Biology",
-	"Geoscience",
-	"Electronics",
-	"Computing",
-	"Psychology",
-	"Medicine",
-	"Society",
-	"Humanities",
-	"Education"
+	"Matematikk",
+	"Fysikk",
+	"Kjemi",
+	"Biologi",
+	"Geovitenskap",
+	"Elektro",
+	"Informatikk",
+	"Psykologi",
+	"Medisin",
+	"Samfunn",
+	"Humaniora",
+	"Utdanning"
 ]
