@@ -36,8 +36,8 @@ LLM_PROVIDERS = {
     "groq": LLMProvider(
         name="groq",
         base_url="https://api.groq.com/openai/v1",
-        model="llama-3.1-8b-instant",
-        cost={"input": 0.05, "output": 0.08}
+        model="llama-3.3-70b-versatile",
+        cost={"input": 0.59, "output": 0.79}
     ),
     "openai": LLMProvider(
         name="openai",
@@ -86,6 +86,8 @@ def prompt_llm(
                     { "type": "text", "text": user_prompt },
                     { "type": "image_url", "image_url": { "url": data_url}}
                 ]
+        
+    max_tokens = max_len // 4 if max_len // 4 > 5 else 5
 
     response = selected_provider.client.chat.completions.create(
         model=selected_provider.model,
@@ -99,7 +101,7 @@ def prompt_llm(
                 "content": user_content
             }   
         ],
-        max_tokens=max_len//4,
+        max_tokens=max_tokens,
         stream=False
     )
 
