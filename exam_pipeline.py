@@ -14,6 +14,7 @@ from io import BytesIO
 import json
 import random
 from typing import Literal
+from datetime import date
 
 from prompt_llm import prompt_llm
 from ocr import ocr_image, page_to_img_bytes, run_in_threads
@@ -54,48 +55,58 @@ class Subject:
     code: str
     name: str
     category: Topic
+    semester: str # Potentially use this in the future
     lang: str
 
 
     def __init__(self, raw_text):
         self.code = self.extract_subject_code(raw_text)
         self.name = self.extract_subject_name(raw_text)
-        self.category = Topic(self.identify_category_and_type(raw_text))
+        topic_name, topic_type = self.identify_category_and_type(raw_text=raw_text)
+        self.category = Topic(topic_name, topic_type)
 
         if self.category.type == "main":
             # make sure that core topics and possible sub topics are used
             pass
-        elif self.cateogry.type == "core":
+        elif self.category.type == "core":
             # make sure that the sub topics of the core topic is used
             pass
 
         if self.category:
-            print(f"Topic extraction successful with value: {self.topic.name}!")
+            print(f"Topic extraction successful with value: {self.category.name}!")
         mydb.add_entity(self) # Assigns self.id
 
     def identify_category_and_type(self, raw_text) -> str:
-        category = prompt_llm(
+        topic_id = prompt_llm(
             system_prompt=(
-                "Identify the main academic category of the subject from the following text. "
-                "Respond with nothing other than the single category name. The possible "
-                f"categories are: {arr_to_enum_str(MAIN_CATEGORIES)}"
+                "Identify the main academic category of the subject from its subject codes. "
+                "Respond with only the number associated with the category, nothing else. "
             ),
-            user_prompt=raw_text,
+            user_prompt=f"Categories: {arr_to_enum_str(MAIN_CATEGORIES)} | Subject: {self.code}, {self.name}",
             response_type="text",
-            max_len=100
+            max_len=20
         )
+        print(f"Topic id: {topic_id}")
+        category = MAIN_CATEGORIES[int(topic_id)]
+        print(f"Category: {category}")
         sufficient = prompt_llm(
             system_prompt=(
-                f"Determine if the category {category} is sufficient to define this exams "
-                "academic field or if a more specific topic is needed. Respond with " # Some amazing prompt needed.
-                "either 0 or 1, where 0: no, 1: yes. "
+                "Respond with either 0 if the category isn't sufficient, and 1 if it is. "
             ),
-            user_prompt=(raw_text),
+            user_prompt=(
+                f"Determine if the category {category} is a fitting description for the "
+                f"subject {self.code[0]} {self.name}, or if a more specific topic is needed. "
+                "If the name of the category appears in the subject name it is likely sufficient. "
+            ),
             response_type="number",
             max_len=2
         )
+
+        sufficient = int(sufficient)
+        print(f"The category was found {'' if sufficient else 'NOT '}sufficient.")
         if sufficient == 0:
             topic_type = "core"
+            """
             category = prompt_llm(
                 system_prompt=(
                     "" # Some amazing prompt to extract core topics from the following text. 
@@ -104,12 +115,12 @@ class Subject:
                 response_type="text",
                 max_len=50
             )
+            """
         else:
             topic_type = "main"
 
 
         return category, topic_type
-
 
     def extract_subject_code(self, raw_text) -> str:
         return prompt_llm(
@@ -123,8 +134,25 @@ class Subject:
             response_type="text_list",
             max_len=200
         )
+
+    def emne_oppslag(self, verdi: str) -> str | None:
+        with open("ntnu_emner.json", encoding="utf-8") as f:
+            emner = json.load(f)
+
+        for emne in emner:
+            if emne["Emnekode"] == verdi:
+                return emne["Emnenavn"]
+            if emne["Emnenavn"] == verdi:
+                return emne["Emnekode"]
+
+        return None
     
     def extract_subject_name(self, raw_text) -> str:
+        for code in self.code:
+            subject_name = self.emne_oppslag(code)
+            if subject_name:
+                return subject_name
+            
         return prompt_llm(
             system_prompt=(
                 "Extract the exam subject name from the following text. Respond with "
@@ -141,48 +169,48 @@ class Topic:
     name: str
     type: Literal["core", "sub", "category"] # May be renamed later
 
-    def __init__(self, raw_text, type):
+    def __init__(self, name, type):
         self.type = type
-        self.name = self.extract_topic(raw_text, type)
+        self.name = name
 
         mydb.add_entity(self) # Assigns self.id
-
-"""    def extract_topic(self, raw_text, depth) -> str:
-        topic_id = prompt_llm(
-            system_prompt=(
-                "Extract the number of the topic assiciated with the following text. "
-                "Respond with nothing other than the single number."
-                f"The topics to be chosen form are: {arr_to_enum_str(MAIN_CATEGORIES)} "
-            ),
-            user_prompt=raw_text,
-            response_type="number",
-            max_len=50
-        )
-        return MAIN_CATEGORIES[int(topic_id)-1]"""
     
 
+assignment_types = ["exam", "assignment"]
 class Exam: # Should generally be named assessment in the future, as it may include assignments etc.
     id: int
     subject: Subject
-    assessment_type: str # e.g. Exam, assignment, home exam, etc. (coursework?)
+
+    assessment_type: Literal["exam", "assignment"] # e.g. Exam, assignment, home exam, etc. (coursework?)
+
+    """exam_date: date | None
+    assignment_number: int | None"""
+    
     year: int
 
     def __init__(self, pdf_path):
-        self.version = ""
-
         mydb.add_entity(self) # Assigns self.id
 
         Pdf(self, pdf_path)
 
         raw_text = self.collect_raw_text()
-        self.version = self.extract_version(raw_text)
+
+        self.assessment_type = self.get_assessment_type(raw_text=raw_text)
+
+        """if self.assessment_type == "exam":
+            # self.exam_date = self.get_exam_date(raw_text=raw_text)
+            self.assignment_number = None
+        else:
+            # self.assignment_number = self.get_assignment_number(raw_text=raw_text)
+            self.exam_date = None"""
 
         self.subject = Subject(raw_text=raw_text)
         
-        mydb.set_values(self, ["subject"])
-        mydb.set_values(self, ["version"])
+        for attr in ["subject", "assessment_type"]:
+            mydb.set_values(self, [attr])
+        
 
-        print(f"Exam created with id={self.id}, version={self.version}, subject={self.subject.name}")
+        print(f"Exam created with id={self.id}, type={self.assessment_type}, subject={self.subject.name}")
 
     def collect_raw_text(self) -> str:
         raw_text = ""
@@ -192,17 +220,17 @@ class Exam: # Should generally be named assessment in the future, as it may incl
                     raw_text += block["raw_text"]
         return raw_text
     
-    def extract_version(self, raw_text) -> str:
-        return prompt_llm(
+    def get_assessment_type(self, raw_text) -> str:
+        topic_id = prompt_llm(
             system_prompt=(
-                "Extract the exam version from the following text formatted as NXY, "
-                "where N is the time of year (V for before july, K for august, and H "
-                "for after september), and XY is the year itself (24 for 2024, 19 for "
-                "2019, etc.)."
+                "Is the content from the following text an exam or an assignment? "
+                f"Respond with the number assiciated with the assessment type: {arr_to_enum_str(assignment_types)}"
             ),
             user_prompt=raw_text,
-            max_len=10
+            response_type="number",
+            max_len=1
         )
+        return assignment_types[int(topic_id)]
 
 class Task:
     id: int
@@ -346,8 +374,8 @@ def test_classes() -> None:
 
 def arr_to_enum_str(arr: list[str]) -> str:
     for i, item in enumerate(arr):
-        arr[i] = f"{i+1}: {item}"
-    return "\n".join(arr)  
+        arr[i] = f"{i}: {item}"
+    return "\n" + ", ".join(arr) + "\n"
 
 def reset_database():
     mydb.delete_tables()
