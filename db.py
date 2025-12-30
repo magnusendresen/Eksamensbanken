@@ -1,11 +1,11 @@
+from datetime import date
 import sqlalchemy
 from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String
-from sqlalchemy import Integer, String, Boolean, Float, Text
+from sqlalchemy import Integer, String, Boolean, Float, Text, ForeignKey, Date
 from typing import get_origin, get_type_hints
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import ForeignKey
 import typing
 
 

@@ -199,15 +199,15 @@ class Topic:
         mydb.add_entity(self) # Assigns self.id
     
 
-assignment_types = ["exam", "assignment"]
 class Exam: # Should generally be named assessment in the future, as it may include assignments etc.
+    assignment_types = ["exam", "assignment"]
     id: int
     subject: Subject
 
     assessment_type: Literal["exam", "assignment"] # e.g. Exam, assignment, home exam, etc. (coursework?)
 
-    """exam_date: date | None
-    assignment_number: int | None"""
+    exam_date: date
+    assignment_number: int
     
     year: int
 
@@ -247,13 +247,13 @@ class Exam: # Should generally be named assessment in the future, as it may incl
         topic_id = prompt_llm(
             system_prompt=(
                 "Is the content from the following text an exam or an assignment? "
-                f"Respond with the number assiciated with the assessment type: {arr_to_enum_str(assignment_types)}"
+                f"Respond with the number assiciated with the assessment type: {arr_to_enum_str(Exam.assignment_types)}"
             ),
             user_prompt=raw_text,
             response_type="number",
             max_len=1
         )
-        return assignment_types[int(topic_id)]
+        return Exam.assignment_types[int(topic_id)]
 
 class Task:
     id: int
