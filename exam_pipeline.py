@@ -173,8 +173,17 @@ class Subject:
     
     def format_subject_code(self):
         formatted_codes = []
+
         for code in self.code:
-            new_code = re.sub(r"[TGA](?=\d)", "X", code).upper()
+            code_u = code.upper()
+            new_code = code_u  # fallback
+
+            if not code_u.startswith("T"):
+                m = re.search(r"\d", code_u)
+                if m:
+                    i = m.start() - 1
+                    if i >= 0 and code_u[i] in {"G", "A"}:
+                        new_code = code_u[:i] + "X" + code_u[i+1:]
 
             for i, formatted_code in enumerate(formatted_codes):
                 if diff_count(new_code, formatted_code) <= 3:
@@ -183,6 +192,8 @@ class Subject:
                     break
             else:
                 formatted_codes.append(new_code)
+
+        formatted_codes.sort(key=lambda c: "X" not in c)
 
         return formatted_codes
 
