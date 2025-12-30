@@ -15,6 +15,7 @@ import json
 import random
 from typing import Literal
 from datetime import date
+import re
 
 from prompt_llm import prompt_llm
 from ocr import ocr_image, page_to_img_bytes, run_in_threads
@@ -55,13 +56,14 @@ class Subject:
     code: str
     name: str
     category: Topic
-    semester: str # Potentially use this in the future
+    # semester: str # Potentially use this in the future
     lang: str
 
 
     def __init__(self, raw_text):
         self.code = self.extract_subject_code(raw_text)
         self.name = self.extract_subject_name(raw_text)
+        self.code = self.format_subject_code()
         topic_name, topic_type = self.identify_category_and_type(raw_text=raw_text)
         self.category = Topic(topic_name, topic_type)
 
@@ -138,7 +140,6 @@ class Subject:
     def emne_oppslag(self, verdi: str) -> str | None:
         with open("ntnu_emner.json", encoding="utf-8") as f:
             emner = json.load(f)
-
         for emne in emner:
             if emne["Emnekode"] == verdi:
                 return emne["Emnenavn"]
@@ -148,21 +149,43 @@ class Subject:
         return None
     
     def extract_subject_name(self, raw_text) -> str:
+        with open("ntnu_emner.json", encoding="utf-8") as f:
+            emner = json.load(f)
         for code in self.code:
-            subject_name = self.emne_oppslag(code)
-            if subject_name:
-                return subject_name
+            for emne in emner:
+                if emne["Emnekode"] == code:
+                    print(f"Match found for {self.code} in json: {emne['Emnekode']}. ")
+                    return smart_capitalize(emne["Emnenavn"])
             
-        return prompt_llm(
-            system_prompt=(
-                "Extract the exam subject name from the following text. Respond with "
-                "nothing other than the subject name. Respond with the full subject name. "
-                f"E.g.: {sample_subject_field('Emnenavn', 50)}"
-            ),
-            user_prompt=raw_text,
-            response_type="text_list",
-            max_len=200
+        print(f"No match found for {self.code} in json. ")
+        return smart_capitalize(
+            prompt_llm(
+                system_prompt=(
+                    "Extract the exam subject name from the following text. Respond with "
+                    "nothing other than the subject name. Respond with the full subject name. "
+                    f"E.g.: {sample_subject_field('Emnenavn', 50)}"
+                ),
+                user_prompt=raw_text,
+                response_type="text",
+                max_len=200
+            )
         )
+    
+    def format_subject_code(self):
+        formatted_codes = []
+        for code in self.code:
+            new_code = re.sub(r"[TGA](?=\d)", "X", code).upper()
+
+            for i, formatted_code in enumerate(formatted_codes):
+                if diff_count(new_code, formatted_code) <= 3:
+                    if "X" in new_code and "X" not in formatted_code:
+                        formatted_codes[i] = new_code
+                    break
+            else:
+                formatted_codes.append(new_code)
+
+        return formatted_codes
+
 
 class Topic:
     id: int
@@ -363,19 +386,25 @@ def select_pdf() -> str:
     root.destroy()
     return file_path
 
-def write_text_to_file(text: str, exam: str) -> None:
-    with open(f"{exam}_parsed.txt", "w", encoding="utf-8") as f:
-        f.write(text)
+def diff_count(a: str, b: str) -> int:
+    return sum(x != y for x, y in zip(a, b)) + abs(len(a) - len(b))
+
+def smart_capitalize(text: str) -> str:
+    def repl(m):
+        word = m.group(0)
+        return word.capitalize() if len(word) >= 4 else word.lower()
+
+    return re.sub(r"\b\w+\b", repl, str(text))
 
 def test_classes() -> None:
     pdf_path = select_pdf()
     Exam(pdf_path)
 
-
 def arr_to_enum_str(arr: list[str]) -> str:
+    enum_arr = []
     for i, item in enumerate(arr):
-        arr[i] = f"{i}: {item}"
-    return "\n" + ", ".join(arr) + "\n"
+        enum_arr.append(f"{i}: {item}")
+    return "\n" + ", ".join(enum_arr) + "\n"
 
 def reset_database():
     mydb.delete_tables()
