@@ -53,6 +53,7 @@ def prompt_llm(
         *,
         response_type: Literal["text", "number", "text_list", "number_list"] = "text",
         image_bytes: bytes | None = None,
+        response_arr: list,
         use_prompt_config: bool = True,
         max_len: int,
         ) -> str:
@@ -74,6 +75,16 @@ def prompt_llm(
         system_prompt += "RESPOND WITH A SINGLE NUMBER. NO QUOTATION MARKS. NO COMMAS. NO LISTS. "
     elif response_type == "numbers":
         system_prompt += "RESPOND WITH A LIST OF NUMBERS SEPARATED BY A COMMA. NOTHING ELSE. "
+
+    enum_str = ""
+    if response_arr:
+        enum_arr = []
+        for i, item in enumerate(response_arr):
+            enum_arr.append(f"{i}: {item}")
+        system_prompt += (
+            "HERE IS THE LIST OF NUMBERS YOU CAN CHOSE FROM AND THEIR VALUES: "
+            ", ".join(enum_arr)
+        )
 
     selected_provider  = ""
     if image_bytes is None:
@@ -121,6 +132,8 @@ def prompt_llm(
         print(f"Response took {int(elapsed)} seconds, and cost around {input_cost + output_cost:.6f} USD.")
         log_prompt_to_file(system_prompt, user_content)
 
+    if response_arr:
+        return response_arr[int(llm_reply.strip())]
 
     if response_type == "number":
         return_type = float if "." in llm_reply else int
