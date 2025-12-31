@@ -48,7 +48,7 @@ def sample_subject_field(
             continue  # vi vil ikke ha lister i prompt-eksempler
         values.append(str(value))
 
-    return ", ".join(values)
+    return values
 
 
 class Subject:
@@ -61,9 +61,17 @@ class Subject:
 
 
     def __init__(self, raw_text):
+        new = True
         self.code = self.extract_subject_code(raw_text)
         self.name = self.extract_subject_name(raw_text)
         self.code = self.format_subject_code()
+
+        rows = mydb.get_rows(Subject, {"name": self.name})
+        if rows:
+            print(f"Subject already found in table, assigning ID and skipping remaining process. ")
+            self.id = rows[0]["id"]
+            return
+
         topic_name, topic_type = self.identify_category_and_type(raw_text=raw_text)
         self.category = Topic(topic_name, topic_type)
 
@@ -79,17 +87,16 @@ class Subject:
         mydb.add_entity(self) # Assigns self.id
 
     def identify_category_and_type(self, raw_text) -> str:
-        topic_id = prompt_llm(
+        category = prompt_llm(
             system_prompt=(
                 "Identify the main academic category of the subject from its subject codes. "
                 "Respond with only the number associated with the category, nothing else. "
             ),
-            user_prompt=f"Categories: {arr_to_enum_str(MAIN_CATEGORIES)} | Subject: {self.code}, {self.name}",
+            user_prompt=f"CSubject: {self.code}, {self.name}",
+            alternatives=MAIN_CATEGORIES,
             response_type="text",
             max_len=20
         )
-        print(f"Topic id: {topic_id}")
-        category = MAIN_CATEGORIES[int(topic_id)]
         print(f"Category: {category}")
         sufficient = prompt_llm(
             system_prompt=(
@@ -130,10 +137,10 @@ class Subject:
                 "Extract the exam subject code from the following text. Respond with "
                 "nothing other than the subject codes. Respond with all subject "
                 "codes in the text separated by a comma. "
-                f"E.g.: {sample_subject_field('Emnekode', 50)}"
             ),
             user_prompt=raw_text,
             response_type="text_list",
+            examples=sample_subject_field('Emnenavn', 50),
             max_len=200
         )
 
@@ -163,10 +170,10 @@ class Subject:
                 system_prompt=(
                     "Extract the exam subject name from the following text. Respond with "
                     "nothing other than the subject name. Respond with the full subject name. "
-                    f"E.g.: {sample_subject_field('Emnenavn', 50)}"
                 ),
                 user_prompt=raw_text,
                 response_type="text",
+                examples=sample_subject_field('Emnenavn', 50),
                 max_len=200
             )
         )
@@ -207,11 +214,16 @@ class Topic:
         self.type = type
         self.name = name
 
+        rows = mydb.get_rows(Topic, {"name": self.name})
+        if rows:
+            print(f"Subject already found in table, assigning ID and skipping remaining process. ")
+            self.id = rows[0]["id"]
+            return
+
         mydb.add_entity(self) # Assigns self.id
     
 
 class Exam: # Should generally be named assessment in the future, as it may include assignments etc.
-    assignment_types = ["exam", "assignment"]
     id: int
     subject: Subject
 
@@ -224,6 +236,11 @@ class Exam: # Should generally be named assessment in the future, as it may incl
 
     def __init__(self, pdf_path):
         mydb.add_entity(self) # Assigns self.id
+        rows = mydb.get_rows(Subject, {"name": self.name})
+        if rows:
+            print(f"Subject already found in table, assigning ID and skipping remaining process. ")
+            self.id = rows[0]["id"]
+            return
 
         Pdf(self, pdf_path)
 
@@ -255,16 +272,16 @@ class Exam: # Should generally be named assessment in the future, as it may incl
         return raw_text
     
     def get_assessment_type(self, raw_text) -> str:
-        topic_id = prompt_llm(
+        return prompt_llm(
             system_prompt=(
                 "Is the content from the following text an exam or an assignment? "
-                f"Respond with the number assiciated with the assessment type: {arr_to_enum_str(Exam.assignment_types)}"
+                f"Respond with the number assiciated with the assessment type. "
             ),
             user_prompt=raw_text,
+            alternatives=["exam", "assignment"],
             response_type="number",
             max_len=1
         )
-        return Exam.assignment_types[int(topic_id)]
 
 class Task:
     id: int
@@ -314,6 +331,8 @@ class Pdf:
 
         for i, raw_page in enumerate(self.raw_pdf):
             Page(pdf=self, raw_page=raw_page, page_number=i)
+
+        mydb.set_values(self, [exam])
 
 
         """
