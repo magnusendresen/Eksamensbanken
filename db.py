@@ -19,6 +19,7 @@ TYPE_MAP = {
     str: Text,
     float: Float,
     bool: Boolean,
+    date: Date,
 }
 
 class DB:
@@ -90,7 +91,7 @@ class DB:
             sql.SQL(" AND ").join(clauses)
         )
 
-        with self.connection.cursor() as cursor:
+        with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, values)
             rows = cursor.fetchall()
             return rows
@@ -154,7 +155,7 @@ class DB:
 
         values.append(obj.id)
 
-        with self.connection.cursor() as cursor:
+        with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
             query = sql.SQL("UPDATE {} SET {} WHERE id = %s").format(
                 sql.Identifier(table_name),
                 sql.SQL(", ").join(sets)
@@ -224,9 +225,9 @@ class DB:
 
     def delete_tables(self):
         print('⚠️  This will DROP ALL TABLES in the current schema.')
-        answer = input('Are you sure? If so type "I AM SURE": ')
+        answer = input('Are you sure? If so type "y": ')
 
-        if answer != "I AM SURE":
+        if answer != "y":
             print("Aborted.")
             return
 
