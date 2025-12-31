@@ -53,7 +53,8 @@ def prompt_llm(
         *,
         response_type: Literal["text", "number", "text_list", "number_list"] = "text",
         image_bytes: bytes | None = None,
-        response_arr: list | None = None,
+        alternatives: list | None = None,
+        examples: list | None = None,
         use_prompt_config: bool = True,
         max_len: int,
         ) -> str:
@@ -76,14 +77,19 @@ def prompt_llm(
     elif response_type == "numbers":
         system_prompt += "RESPOND WITH A LIST OF NUMBERS SEPARATED BY A COMMA. NOTHING ELSE. "
 
-    enum_str = ""
-    if response_arr:
+    if alternatives:
         enum_arr = []
-        for i, item in enumerate(response_arr):
+        for i, item in enumerate(alternatives):
             enum_arr.append(f"{i}: {item}")
         system_prompt += (
             "HERE IS THE LIST OF NUMBERS YOU CAN CHOSE FROM AND THEIR VALUES: "
             ", ".join(enum_arr)
+        )
+
+    if examples:
+        examples = ', '.join(examples)
+        system_prompt += (
+            f"HERE ARE SOME EXAMPLES: {examples}"
         )
 
     selected_provider  = ""
@@ -132,8 +138,8 @@ def prompt_llm(
         print(f"Response took {int(elapsed)} seconds, and cost around {input_cost + output_cost:.6f} USD.")
         log_prompt_to_file(system_prompt, user_content)
 
-    if response_arr:
-        return response_arr[int(llm_reply.strip())]
+    if alternatives:
+        return alternatives[int(llm_reply.strip())]
     if response_type == "number":
         return_type = float if "." in llm_reply else int
         return return_type(llm_reply.strip())
