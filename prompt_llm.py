@@ -53,7 +53,7 @@ def prompt_llm(
         *,
         response_type: Literal["text", "number", "text_list", "number_list"] = "text",
         image_bytes: bytes | None = None,
-        response_arr: list,
+        response_arr: list | None = None,
         use_prompt_config: bool = True,
         max_len: int,
         ) -> str:
@@ -134,7 +134,6 @@ def prompt_llm(
 
     if response_arr:
         return response_arr[int(llm_reply.strip())]
-
     if response_type == "number":
         return_type = float if "." in llm_reply else int
         return return_type(llm_reply.strip())
