@@ -57,11 +57,8 @@ class Subject:
     name: str
     category: Topic
     # semester: str # Potentially use this in the future
-    lang: str
-
 
     def __init__(self, raw_text):
-        new = True
         self.code = self.extract_subject_code(raw_text)
         self.name = self.extract_subject_name(raw_text)
         self.code = self.format_subject_code()
@@ -83,7 +80,8 @@ class Subject:
             pass
 
         if self.category:
-            print(f"Topic extraction successful with value: {self.category.name}!")
+            print(f"Category extraction successful with value: {self.category.name}!")
+
         mydb.add_entity(self) # Assigns self.id
 
     def identify_category_and_type(self, raw_text) -> str:
@@ -216,7 +214,7 @@ class Topic:
 
         rows = mydb.get_rows(Topic, {"name": self.name})
         if rows:
-            print(f"Subject already found in table, assigning ID and skipping remaining process. ")
+            print(f"Topic already found in table, assigning ID and skipping remaining process. ")
             self.id = rows[0]["id"]
             return
 
@@ -231,39 +229,63 @@ class Exam: # Should generally be named assessment in the future, as it may incl
 
     exam_date: date
     assignment_number: int
-    
-    year: int
+    lang: str
 
     def __init__(self, pdf_path):
-        mydb.add_entity(self) # Assigns self.id
-        rows = mydb.get_rows(Subject, {"name": self.name})
-        if rows:
-            print(f"Subject already found in table, assigning ID and skipping remaining process. ")
-            self.id = rows[0]["id"]
-            return
-
+        self._pdfs = []
         Pdf(self, pdf_path)
 
         raw_text = self.collect_raw_text()
 
-        self.assessment_type = self.get_assessment_type(raw_text=raw_text)
-
-        """if self.assessment_type == "exam":
-            # self.exam_date = self.get_exam_date(raw_text=raw_text)
-            self.assignment_number = None
-        else:
-            # self.assignment_number = self.get_assignment_number(raw_text=raw_text)
-            self.exam_date = None"""
-
         self.subject = Subject(raw_text=raw_text)
-        
-        for attr in ["subject", "assessment_type"]:
-            mydb.set_values(self, [attr])
-        
 
-        print(f"Exam created with id={self.id}, type={self.assessment_type}, subject={self.subject.name}")
+        self.assessment_type = self.get_assessment_type(raw_text=raw_text)
+        print(f"Assessment type found to be {self.assessment_type}")
+
+        exam_rows = []
+        if self.assessment_type == "exam":
+            self.exam_date = date.fromisoformat(self.get_exam_date(raw_text=raw_text))
+            exam_rows = mydb.get_rows(Exam, {"subject": self.subject, "exam_date": self.exam_date})
+            print(f"Exam date found to be: {self.exam_date}")
+        elif self.assessment_type == "assignment":
+            self.assignment_number = self.get_assignment_number(raw_text=raw_text)
+            exam_rows = mydb.get_rows(Exam, {"subject": self.subject, "assignment_number": self.assignment_number})
+            print(f"Assignment number found to be: {self.assignment_number}")
+            
+        
+        
+        ocr_text = ""
+        if not exam_rows:
+            ocr_text = self.collect_ocr_text_ram()
+            self.lang = self.get_exam_lang(raw_text=raw_text)
+
+            self.commit_exam_tree()
+
+
+        else:
+            print(f"Exam already found in table, collecting data. ")
+            self.id = exam_rows[0]["id"]
+            ocr_text = self.collect_ocr_text_db()
+
+        if ocr_text:
+            print(f"OCR text successfully extractes with len({len(ocr_text)})")
+
+        # print(f"Exam created with id={self.id}, type={self.assessment_type}, subject={self.subject.name}")
 
     def collect_raw_text(self) -> str:
+        if getattr(self, "id", None) is None:
+            return self.collect_raw_text_ram()
+        return self.collect_raw_text_db()
+
+    def collect_raw_text_ram(self) -> str:
+        raw_text = ""
+        for pdf in self._pdfs:
+            for page in pdf._pages:
+                for block in page._blocks:
+                    raw_text += block.raw_text
+        return raw_text
+    
+    def collect_raw_text_db(self) -> str:
         raw_text = ""
         for pdf in mydb.select_children(parent_cls=Exam, child_cls=Pdf, parent_id=self.id):
             for page in mydb.select_children(parent_cls=Pdf, child_cls=Page, parent_id=pdf["id"], order_by=["page_number"]):
@@ -271,6 +293,31 @@ class Exam: # Should generally be named assessment in the future, as it may incl
                     raw_text += block["raw_text"]
         return raw_text
     
+    def collect_ocr_text_ram(self) -> str:
+        ocr_text = ""
+        for page in self._pdfs[0]._pages:
+            page.ocr_text = str(
+                ocr_image(page_to_img_bytes(page.raw_page))
+            )
+            ocr_text += page.ocr_text
+        return ocr_text
+
+    def collect_ocr_text_db(self) -> str:
+        ocr_text = ""
+        for pdf in mydb.select_children(parent_cls=Exam, child_cls=Pdf, parent_id=self.id):
+            for page in mydb.select_children(parent_cls=Pdf, child_cls=Page, parent_id=pdf["id"], order_by=["page_number"]):
+                ocr_text += page["ocr_text"]
+        return ocr_text
+
+    def commit_exam_tree(self) -> None:
+        mydb.add_entity(self)
+        for pdf in self._pdfs:
+            mydb.add_entity(pdf)
+            for page in pdf._pages:
+                mydb.add_entity(page)
+                for block in page._blocks:
+                    mydb.add_entity(block)
+
     def get_assessment_type(self, raw_text) -> str:
         return prompt_llm(
             system_prompt=(
@@ -283,6 +330,47 @@ class Exam: # Should generally be named assessment in the future, as it may incl
             max_len=1
         )
 
+    def get_exam_date(self, raw_text):
+        return prompt_llm(
+            system_prompt=(
+                "Extract the exam date from the following text. "
+                "Respond with only the exam date, nothing else. "
+                "The format should be YYYY-MM-DD. "
+            ),
+            user_prompt=raw_text,
+            response_type="text",
+            examples=["2025-12-17", "2019-07-21", "2004-02-26"],
+            max_len=50
+        )
+    
+    def get_assignment_number(self, raw_text) -> int:
+        return prompt_llm(
+            system_prompt=(
+                "Extract the assignment number (a small integer). "
+                "This is NOT a subject code. "
+                "If no assignment number is present, respond with 999. "
+                "Respond with digits only. "
+
+            ),
+            user_prompt=raw_text,
+            response_type="number",
+            examples=["1", "3", "10", "20", "7", "999"],
+            max_len=50
+        )
+
+    def get_exam_lang(self, raw_text) -> str:
+        return prompt_llm(
+            system_prompt=(
+                "Extract the language from the following exam. "
+                "If there are multiple languages, respond with the most apparent one. "
+                "Respond with the abbreviated language name according to ISO 639-1. "
+            ),
+            user_prompt=raw_text,
+            response_type="text",
+            examples=["nn", "nb", "en", "sv", "da"],
+            max_len=2
+        )
+    
 class Task:
     id: int
     exam: Exam
@@ -324,16 +412,16 @@ class Pdf:
         self.exam = exam
         self.name = ""
 
+        self._pages = []
+
         self.raw_pdf = fitz.open(path)
         self.path = path
 
-        mydb.add_entity(self) # Assigns self.id
-
         for i, raw_page in enumerate(self.raw_pdf):
             Page(pdf=self, raw_page=raw_page, page_number=i)
+            print(f"Processed page: {i}")
 
-        mydb.set_values(self, [exam])
-
+        exam._pdfs.append(self)
 
         """
         self.name = f"{self.exam.subject.code}_{self.exam.version}"
@@ -352,15 +440,17 @@ class Page:
     def __init__(self, pdf, raw_page, page_number: int):
         self.pdf = pdf
         self.raw_page = raw_page
+
+        self._blocks = []
         
         self.page_number = page_number
 
-        self.ocr_text = str(ocr_image(page_to_img_bytes(raw_page)))
-
-        mydb.add_entity(self) # Assigns self.id
+        # self.ocr_text = str(ocr_image(page_to_img_bytes(raw_page)))
 
         for i, raw_block in enumerate(raw_page.get_text("dict")["blocks"]):
             PdfBlock(page=self, raw_block=raw_block, block_number=i)
+
+        pdf._pages.append(self)
 
 
 class PdfBlock:
@@ -383,8 +473,9 @@ class PdfBlock:
 
         self.bbox = raw_block["bbox"]
 
-        mydb.add_entity(self)
-        print(f"PdfBlock.id = {self.id}, page.page_number = {self.page.page_number}, pdf.id = {self.page.pdf.id}")
+        page._blocks.append(self)
+
+        # print(f"PdfBlock.id = {self.id}, page.page_number = {self.page.page_number}, pdf.id = {self.page.pdf.id}")
 
     
     def get_block_text(self) -> str:
