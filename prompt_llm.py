@@ -10,7 +10,7 @@ from pathlib import Path
 import time
 from openai import OpenAI
 
-LOG_PROMPTS = True
+LOG_PROMPTS = False
 
 class LLMProvider:
     def __init__(self, *, name: str, base_url: str, model: str, cost: dict[str, float]):
@@ -68,7 +68,7 @@ def prompt_llm(
         system_prompt += (
             "DO AS YOU ARE TOLD AND RESPOND ONLY WITH WHAT IS ASKED FROM YOU. "
             "DO NOT EXPLAIN OR SAY WHAT YOU ARE DOING (e.g. here is the..., below is..., sure here is..., etc.). "
-            "DO NOT WRITE ANY SYMBOLS LIKE - OR \\n OR CHANGE LETTER FORMATTING WITH ** AND SIMILAR. "
+            "DO NOT WRITE ANY SYMBOLS LIKE \\n OR CHANGE LETTER FORMATTING WITH ** AND SIMILAR. "
             "YOU ARE USED IN A TEXT PROCESSING PYTHON PROGRAM SO THE TEXT SHOULD BE PLAIN. "
         )
 
@@ -87,7 +87,7 @@ def prompt_llm(
         )
 
     if examples:
-        examples = ', '.join(examples)
+        examples = ', '.join(map(str, examples))
         system_prompt += (
             f"HERE ARE SOME EXAMPLES: {examples}"
         )
