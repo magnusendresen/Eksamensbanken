@@ -181,12 +181,12 @@ if __name__ == "__main__":
         raise RuntimeError("No file selected.")
 
     with open(file_path, "rb") as f:
-        img_bytes = f.read()
+        image_bytes = f.read()
 
     result = prompt_llm(
         system_prompt="Write all text found in this image.",
         user_prompt="",
-        image_bytes=img_bytes,
+        image_bytes=image_bytes,
         response_type="text",
         max_len=200
     )

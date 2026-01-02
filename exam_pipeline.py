@@ -18,7 +18,7 @@ from datetime import date
 import re
 
 from prompt_llm import prompt_llm
-from ocr import ocr_image, page_to_img_bytes, run_in_threads
+from ocr import ocr_image, page_to_image_bytes, run_in_threads
 import db
 from my_dicts import MAIN_CATEGORIES
 
@@ -221,11 +221,11 @@ class Topic:
         mydb.add_entity(self) # Assigns self.id
     
 
-class Exam: # Should generally be named assessment in the future, as it may include assignments etc.
+class Exam: # Should generally be named assessment in the future
     id: int
     subject: Subject
 
-    assessment_type: Literal["exam", "assignment"] # e.g. Exam, assignment, home exam, etc. (coursework?)
+    assessment_type: Literal["exam", "assignment"]
 
     exam_date: date
     assignment_number: int
@@ -235,79 +235,63 @@ class Exam: # Should generally be named assessment in the future, as it may incl
         self._pdfs = []
         Pdf(self, pdf_path)
 
-        raw_text = self.collect_raw_text()
+        self._raw_text = self.collect_raw_text()
 
-        self.subject = Subject(raw_text=raw_text)
+        self._in_database = False
 
-        self.assessment_type = self.get_assessment_type(raw_text=raw_text)
+        self.subject = Subject(raw_text=self._raw_text)
+
+        self.assessment_type = self.get_assessment_type(raw_text=self._raw_text)
         print(f"Assessment type found to be {self.assessment_type}")
 
         exam_rows = []
         if self.assessment_type == "exam":
-            self.exam_date = date.fromisoformat(self.get_exam_date(raw_text=raw_text))
+            self.exam_date = date.fromisoformat(self.get_exam_date(raw_text=self._raw_text))
             exam_rows = mydb.get_rows(Exam, {"subject": self.subject, "exam_date": self.exam_date})
             print(f"Exam date found to be: {self.exam_date}")
         elif self.assessment_type == "assignment":
-            self.assignment_number = self.get_assignment_number(raw_text=raw_text)
+            self.assignment_number = self.get_assignment_number(raw_text=self._raw_text)
             exam_rows = mydb.get_rows(Exam, {"subject": self.subject, "assignment_number": self.assignment_number})
             print(f"Assignment number found to be: {self.assignment_number}")
             
         
-        
-        ocr_text = ""
-        if not exam_rows:
-            ocr_text = self.collect_ocr_text_ram()
-            self.lang = self.get_exam_lang(raw_text=raw_text)
-
-            self.commit_exam_tree()
-
-
-        else:
-            print(f"Exam already found in table, collecting data. ")
+        if exam_rows:
+            self._in_database = True
             self.id = exam_rows[0]["id"]
-            ocr_text = self.collect_ocr_text_db()
+            print(f"Exam already found in table, collecting data. ")
 
+        ocr_text = self.collect_ocr_text()
         if ocr_text:
             print(f"OCR text successfully extractes with len({len(ocr_text)})")
 
-        # print(f"Exam created with id={self.id}, type={self.assessment_type}, subject={self.subject.name}")
+        # Complete process continues here:
+        if not exam_rows:
+            self.lang = self.get_exam_lang(raw_text=self._raw_text)
+
+            
+            self.commit_exam_tree()
+
 
     def collect_raw_text(self) -> str:
-        if getattr(self, "id", None) is None:
-            return self.collect_raw_text_ram()
-        return self.collect_raw_text_db()
-
-    def collect_raw_text_ram(self) -> str:
         raw_text = ""
         for pdf in self._pdfs:
             for page in pdf._pages:
                 for block in page._blocks:
                     raw_text += block.raw_text
         return raw_text
-    
-    def collect_raw_text_db(self) -> str:
-        raw_text = ""
-        for pdf in mydb.select_children(parent_cls=Exam, child_cls=Pdf, parent_id=self.id):
-            for page in mydb.select_children(parent_cls=Pdf, child_cls=Page, parent_id=pdf["id"], order_by=["page_number"]):
-                for block in mydb.select_children(parent_cls=Page, child_cls=PdfBlock, parent_id=page["id"], order_by=["block_number"]):
-                    raw_text += block["raw_text"]
-        return raw_text
-    
-    def collect_ocr_text_ram(self) -> str:
+        
+    def collect_ocr_text(self) -> str:
         ocr_text = ""
-        for page in self._pdfs[0]._pages:
-            page.ocr_text = str(
-                ocr_image(page_to_img_bytes(page.raw_page))
-            )
-            ocr_text += page.ocr_text
-        return ocr_text
-
-    def collect_ocr_text_db(self) -> str:
-        ocr_text = ""
-        for pdf in mydb.select_children(parent_cls=Exam, child_cls=Pdf, parent_id=self.id):
-            for page in mydb.select_children(parent_cls=Pdf, child_cls=Page, parent_id=pdf["id"], order_by=["page_number"]):
-                ocr_text += page["ocr_text"]
-        return ocr_text
+        if self._in_database:
+            for pdf in mydb.select_children(parent_cls=Exam, child_cls=Pdf, parent_id=self.id):
+                for page in mydb.select_children(parent_cls=Pdf, child_cls=Page, parent_id=pdf["id"], order_by=["page_number"]):
+                    ocr_text += page["ocr_text"]
+            return ocr_text
+        else:
+            for page in self._pdfs[0]._pages:
+                page.ocr_text = str(ocr_image(page._image_bytes))
+                ocr_text += page.ocr_text
+            return ocr_text
 
     def commit_exam_tree(self) -> None:
         mydb.add_entity(self)
@@ -371,6 +355,9 @@ class Exam: # Should generally be named assessment in the future, as it may incl
             max_len=2
         )
     
+        
+        
+
 class Task:
     id: int
     exam: Exam
@@ -417,9 +404,14 @@ class Pdf:
         self.raw_pdf = fitz.open(path)
         self.path = path
 
+        self._skipped_blocks = 0
+        self._total_blocks = 0
+
         for i, raw_page in enumerate(self.raw_pdf):
             Page(pdf=self, raw_page=raw_page, page_number=i)
             print(f"Processed page: {i}")
+
+        print(f"PDF ended up adding {self._total_blocks} blocks, skipping: {self._skipped_blocks} blocks. ")
 
         exam._pdfs.append(self)
 
@@ -441,14 +433,16 @@ class Page:
         self.pdf = pdf
         self.raw_page = raw_page
 
+        self._image_bytes = page_to_image_bytes(raw_page)
+
         self._blocks = []
         
         self.page_number = page_number
 
-        # self.ocr_text = str(ocr_image(page_to_img_bytes(raw_page)))
+        # self.ocr_text = str(ocr_image(page_to_image_bytes(raw_page)))
 
-        for i, raw_block in enumerate(raw_page.get_text("dict")["blocks"]):
-            PdfBlock(page=self, raw_block=raw_block, block_number=i)
+        for raw_block in raw_page.get_text("dict")["blocks"]:
+            PdfBlock(page=self, raw_block=raw_block)
 
         pdf._pages.append(self)
 
@@ -457,21 +451,33 @@ class PdfBlock:
     id: int
     page: Page
     block_number: int
-    type: int # 0=Text, 1=Image
+    type: int # 0=Text, 1=image
     raw_text: str
     bbox: list[float]
 
-    def __init__(self, page, raw_block, block_number: int):
+    def __init__(self, page, raw_block):
         self.page = page
 
         self.raw_block = raw_block
 
-        self.block_number = block_number
         self.type = raw_block["type"]
 
-        self.raw_text = self.get_block_text()
-
         self.bbox = raw_block["bbox"]
+
+        x0, y0, x1, y1 = self.bbox
+
+        area = abs(x1 - x0) * abs(y1 - y0)
+
+
+        if area < 500 and self.type == 0:
+            self.page.pdf._skipped_blocks += 1
+            return
+        
+        self.block_number = len(page._blocks)
+
+        self.page.pdf._total_blocks += 1
+
+        self.raw_text = self.get_block_text()
 
         page._blocks.append(self)
 
@@ -484,11 +490,11 @@ class PdfBlock:
             for line in self.raw_block.get("lines", []):
                 for span in line.get("spans", []):
                     block_text += span.get("text", "") + "\n"
-        elif self.type == 1: # Image
+        elif self.type == 1: # image
             x0, y0, x1, y1 = self.raw_block["bbox"]
             pix = self.page.raw_page.get_pixmap(clip=fitz.Rect(x0, y0, x1, y1))
-            img_data = pix.tobytes("png")
-            image = Image.open(BytesIO(img_data))
+            image_data = pix.tobytes("png")
+            image = Image.open(BytesIO(image_data))
             block_text = pytesseract.image_to_string(image)
         else:
             block_text = ""
@@ -506,6 +512,14 @@ def select_pdf() -> str:
     )
     root.destroy()
     return file_path
+
+def crop_page_to_image_bytes(raw_page, bbox: list):
+    pix = raw_page.get_pixmap(clip=fitz.Rect(bbox))
+    return pix.tobytes("png")
+
+
+def popup_image(image_bytes: bytes):
+    Image.open(BytesIO(image_bytes)).show()
 
 def diff_count(a: str, b: str) -> int:
     return sum(x != y for x, y in zip(a, b)) + abs(len(a) - len(b))

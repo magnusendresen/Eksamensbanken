@@ -13,14 +13,14 @@ async def run_in_threads(func, items):
     tasks = [asyncio.to_thread(func, item) for item in items]
     return await asyncio.gather(*tasks)
 
-def page_to_img_bytes(page) -> bytes:
+def page_to_image_bytes(page) -> bytes:
     mat = fitz.Matrix(2, 2)
     pix = page.get_pixmap(matrix=mat, alpha=False)
     return pix.tobytes("png")
 
-def ocr_image(img: bytes) -> str:
+def ocr_image(image: bytes) -> str:
     try:
-        image = vision.Image(content=img)
+        image = vision.Image(content=image)
         response = client.text_detection(image=image)
         return response.text_annotations
     except Exception as e:
