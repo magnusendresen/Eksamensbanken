@@ -10,8 +10,6 @@ from pathlib import Path
 import time
 from openai import OpenAI
 
-LOG_PROMPTS = False
-
 class LLMProvider:
     def __init__(self, *, name: str, base_url: str, model: str, cost: dict[str, float]):
         self.name = name
@@ -57,6 +55,7 @@ def prompt_llm(
         examples: list | None = None,
         use_prompt_config: bool = True,
         max_len: int,
+        log_prompt: bool = False,
         ) -> str:
     
     if response_type not in ("text", "number", "text_list", "number_list"):
@@ -134,7 +133,7 @@ def prompt_llm(
 
     elapsed = time.time() - start_time 
 
-    if LOG_PROMPTS:
+    if log_prompt:
         print(f"Response took {int(elapsed)} seconds, and cost around {input_cost + output_cost:.6f} USD.")
         log_prompt_to_file(system_prompt, user_content)
 
