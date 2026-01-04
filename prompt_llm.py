@@ -73,7 +73,7 @@ def prompt_llm(
 
     if response_type == "number":
         system_prompt += "RESPOND WITH A SINGLE NUMBER. NO QUOTATION MARKS. NO COMMAS. NO LISTS. "
-    elif response_type == "numbers":
+    elif response_type == "number_list":
         system_prompt += "RESPOND WITH A LIST OF NUMBERS SEPARATED BY A COMMA. NOTHING ELSE. "
 
     if alternatives:
